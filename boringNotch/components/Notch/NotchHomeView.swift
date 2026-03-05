@@ -1,0 +1,1023 @@
+//
+//  NotchHomeView.swift
+//  boringNotch
+//
+//  Created by Hugo Persson on 2024-08-18.
+//  Modified by Harsh Vardhan Goswami & Richard Kunkli & Mustafa Ramadan
+//
+
+import Combine
+import Defaults
+import SwiftUI
+
+// MARK: - Music Player Components
+
+struct MusicPlayerView: View {
+    @EnvironmentObject var vm: BoringViewModel
+    let albumArtNamespace: Namespace.ID
+    @Default(.musicPlayerPrivacyMode) var privacyMode
+
+    var body: some View {
+        HStack {
+            if !privacyMode {
+                AlbumArtView(vm: vm, albumArtNamespace: albumArtNamespace).padding(.all, 5)
+            }
+            MusicControlsView(privacyMode: privacyMode).drawingGroup().compositingGroup()
+        }
+    }
+}
+
+struct AlbumArtView: View {
+    @ObservedObject var musicManager = MusicManager.shared
+    @ObservedObject var vm: BoringViewModel
+    let albumArtNamespace: Namespace.ID
+
+    var body: some View {
+        ZStack(alignment: .bottomTrailing) {
+            if Defaults[.lightingEffect] {
+                albumArtBackground
+            }
+            albumArtButton
+        }
+    }
+
+    private var albumArtBackground: some View {
+        Image(nsImage: musicManager.albumArt)
+            .resizable()
+            .clipped()
+            .clipShape(
+                RoundedRectangle(
+                    cornerRadius: Defaults[.cornerRadiusScaling]
+                        ? MusicPlayerImageSizes.cornerRadiusInset.opened
+                        : MusicPlayerImageSizes.cornerRadiusInset.closed)
+            )
+            .aspectRatio(1, contentMode: .fit)
+            .scaleEffect(x: 1.3, y: 1.4)
+            .rotationEffect(.degrees(92))
+            .blur(radius: 40)
+            .opacity(musicManager.isPlaying ? 0.5 : 0)
+    }
+
+    private var albumArtButton: some View {
+        ZStack {
+            Button {
+                musicManager.openMusicApp()
+            } label: {
+                ZStack(alignment:.bottomTrailing) {
+                    albumArtImage
+                    appIconOverlay
+                }
+            }
+            .buttonStyle(PlainButtonStyle())
+            .scaleEffect(musicManager.isPlaying ? 1 : 0.85)
+            
+            albumArtDarkOverlay
+        }
+    }
+
+    private var albumArtDarkOverlay: some View {
+        Rectangle()
+            .aspectRatio(1, contentMode: .fit)
+            .foregroundColor(Color.black)
+            .opacity(musicManager.isPlaying ? 0 : 0.8)
+            .blur(radius: 50)
+    }
+                
+
+    private var albumArtImage: some View {
+        Image(nsImage: musicManager.albumArt)
+            .resizable()
+            .aspectRatio(1, contentMode: .fit)
+            .matchedGeometryEffect(id: "albumArt", in: albumArtNamespace)
+            .clipped()
+            .clipShape(
+                RoundedRectangle(
+                    cornerRadius: Defaults[.cornerRadiusScaling]
+                        ? MusicPlayerImageSizes.cornerRadiusInset.opened
+                        : MusicPlayerImageSizes.cornerRadiusInset.closed)
+            )
+    }
+
+    @ViewBuilder
+    private var appIconOverlay: some View {
+        if vm.notchState == .open && !musicManager.usingAppIconForArtwork {
+            AppIcon(for: musicManager.bundleIdentifier ?? "com.apple.Music")
+                .resizable()
+                .aspectRatio(contentMode: .fill)
+                .frame(width: 30, height: 30)
+                .offset(x: 10, y: 10)
+                .transition(.scale.combined(with: .opacity))
+                .zIndex(2)
+        }
+    }
+}
+
+struct MusicControlsView: View {
+    @ObservedObject var musicManager = MusicManager.shared
+    @EnvironmentObject var vm: BoringViewModel
+    @ObservedObject var webcamManager = WebcamManager.shared
+    @State private var sliderValue: Double = 0
+    @State private var dragging: Bool = false
+    @State private var lastDragged: Date = .distantPast
+    @Default(.musicControlSlots) private var slotConfig
+    @Default(.musicControlSlotLimit) private var slotLimit
+    
+    var privacyMode: Bool = false
+
+    var body: some View {
+        VStack(alignment: .leading) {
+            if privacyMode {
+                privacyModeContent
+            } else {
+                songInfoAndSlider
+            }
+            slotToolbar
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+    
+    private var privacyModeContent: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "lock.shield.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(.gray)
+                Text("Privacy Mode")
+                    .font(.subheadline)
+                    .foregroundColor(.gray)
+            }
+            .padding(.top, 10)
+            .padding(.leading, 5)
+            
+            musicSlider
+        }
+        .frame(height: 80)
+    }
+
+    private var songInfoAndSlider: some View {
+        GeometryReader { geo in
+            VStack(alignment: .leading, spacing: 4) {
+                songInfo(width: geo.size.width)
+                musicSlider
+            }
+        }
+        .padding(.top, 10)
+        .padding(.leading, 5)
+    }
+
+    private func songInfo(width: CGFloat) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            MarqueeText(
+                $musicManager.songTitle, font: .headline, nsFont: .headline, textColor: .white,
+                frameWidth: width)
+            MarqueeText(
+                $musicManager.artistName,
+                font: .headline,
+                nsFont: .headline,
+                textColor: Defaults[.playerColorTinting]
+                    ? Color(nsColor: musicManager.avgColor)
+                        .ensureMinimumBrightness(factor: 0.6) : .gray,
+                frameWidth: width
+            )
+            .fontWeight(.medium)
+            if Defaults[.enableLyrics] {
+                TimelineView(.animation(minimumInterval: 0.25)) { timeline in
+                    let currentElapsed: Double = {
+                        guard musicManager.isPlaying else { return musicManager.elapsedTime }
+                        let delta = timeline.date.timeIntervalSince(musicManager.timestampDate)
+                        let progressed = musicManager.elapsedTime + (delta * musicManager.playbackRate)
+                        return min(max(progressed, 0), musicManager.songDuration)
+                    }()
+                    let line: String = {
+                        if musicManager.isFetchingLyrics { return "Loading lyrics…" }
+                        if !musicManager.syncedLyrics.isEmpty {
+                            return musicManager.lyricLine(at: currentElapsed)
+                        }
+                        let trimmed = musicManager.currentLyrics.trimmingCharacters(in: .whitespacesAndNewlines)
+                        return trimmed.isEmpty ? "No lyrics found" : trimmed.replacingOccurrences(of: "\n", with: " ")
+                    }()
+                    let isPersian = line.unicodeScalars.contains { scalar in
+                        let v = scalar.value
+                        return v >= 0x0600 && v <= 0x06FF
+                    }
+                    MarqueeText(
+                        .constant(line),
+                        font: .subheadline,
+                        nsFont: .subheadline,
+                        textColor: musicManager.isFetchingLyrics ? .gray.opacity(0.7) : .gray,
+                        frameWidth: width
+                    )
+                    .font(isPersian ? .custom("Vazirmatn-Regular", size: NSFont.preferredFont(forTextStyle: .subheadline).pointSize) : .subheadline)
+                    .lineLimit(1)
+                    .opacity(musicManager.isPlaying ? 1 : 0)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+            }
+        }
+    }
+
+    private var musicSlider: some View {
+        TimelineView(.animation(minimumInterval: musicManager.playbackRate > 0 ? 0.1 : nil)) { timeline in
+            MusicSliderView(
+                sliderValue: $sliderValue,
+                duration: $musicManager.songDuration,
+                lastDragged: $lastDragged,
+                color: musicManager.avgColor,
+                dragging: $dragging,
+                currentDate: timeline.date,
+                timestampDate: musicManager.timestampDate,
+                elapsedTime: musicManager.elapsedTime,
+                playbackRate: musicManager.playbackRate,
+                isPlaying: musicManager.isPlaying
+            ) { newValue in
+                MusicManager.shared.seek(to: newValue)
+            }
+            .padding(.top, 5)
+            .frame(height: 36)
+        }
+    }
+
+    private var slotToolbar: some View {
+        let slots = activeSlots
+        return HStack(spacing: 6) {
+            ForEach(Array(slots.enumerated()), id: \.offset) { index, slot in
+                slotView(for: slot)
+                    .frame(alignment: .center)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .center)
+    }
+
+    private var activeSlots: [MusicControlButton] {
+        let sanitizedLimit = min(
+            max(slotLimit, MusicControlButton.minSlotCount),
+            MusicControlButton.maxSlotCount
+        )
+        let padded = slotConfig.padded(to: sanitizedLimit, filler: .none)
+        let result = Array(padded.prefix(sanitizedLimit))
+        // If calendar and camera are both visible alongside music, hide the edge slots
+        let shouldHideEdges = Defaults[.showCalendar] && Defaults[.showMirror] && webcamManager.cameraAvailable && vm.isCameraExpanded
+        if shouldHideEdges && result.count >= 5 {
+            return Array(result.dropFirst().dropLast())
+        }
+
+        return result
+    }
+
+    @ViewBuilder
+    private func slotView(for slot: MusicControlButton) -> some View {
+        switch slot {
+        case .shuffle:
+            HoverButton(icon: "shuffle", iconColor: musicManager.isShuffled ? .red : .primary, scale: .medium) {
+                MusicManager.shared.toggleShuffle()
+            }
+        case .previous:
+            HoverButton(icon: "backward.fill", scale: .medium) {
+                MusicManager.shared.previousTrack()
+            }
+        case .playPause:
+            HoverButton(icon: musicManager.isPlaying ? "pause.fill" : "play.fill", scale: .large) {
+                MusicManager.shared.togglePlay()
+            }
+        case .next:
+            HoverButton(icon: "forward.fill", scale: .medium) {
+                MusicManager.shared.nextTrack()
+            }
+        case .repeatMode:
+            HoverButton(icon: repeatIcon, iconColor: repeatIconColor, scale: .medium) {
+                MusicManager.shared.toggleRepeat()
+            }
+        case .volume:
+            VolumeControlView()
+        case .favorite:
+            FavoriteControlButton()
+        case .goBackward:
+            HoverButton(icon: "gobackward.15", scale: .medium) {
+                MusicManager.shared.skip(seconds: -15)
+            }
+        case .goForward:
+            HoverButton(icon: "goforward.15", scale: .medium) {
+                MusicManager.shared.skip(seconds: 15)
+            }
+        case .none:
+            Color.clear.frame(height: 1)
+        }
+    }
+
+    private var repeatIcon: String {
+        switch musicManager.repeatMode {
+        case .off:
+            return "repeat"
+        case .all:
+            return "repeat"
+        case .one:
+            return "repeat.1"
+        }
+    }
+
+    private var repeatIconColor: Color {
+        switch musicManager.repeatMode {
+        case .off:
+            return .primary
+        case .all, .one:
+            return .red
+        }
+    }
+}
+
+struct FavoriteControlButton: View {
+    @ObservedObject var musicManager = MusicManager.shared
+
+    var body: some View {
+        HoverButton(icon: iconName, iconColor: iconColor, scale: .medium) {
+            MusicManager.shared.toggleFavoriteTrack()
+        }
+        .disabled(!musicManager.canFavoriteTrack)
+        .opacity(musicManager.canFavoriteTrack ? 1 : 0.35)
+    }
+
+    private var iconName: String {
+        musicManager.isFavoriteTrack ? "heart.fill" : "heart"
+    }
+
+    private var iconColor: Color {
+        musicManager.isFavoriteTrack ? .red : .primary
+    }
+}
+
+private extension Array where Element == MusicControlButton {
+    func padded(to length: Int, filler: MusicControlButton) -> [MusicControlButton] {
+        if count >= length { return self }
+        return self + Array(repeating: filler, count: length - count)
+    }
+}
+
+// MARK: - Volume Control View
+
+struct VolumeControlView: View {
+    @ObservedObject var musicManager = MusicManager.shared
+    @State private var volumeSliderValue: Double = 0.5
+    @State private var dragging: Bool = false
+    @State private var showVolumeSlider: Bool = false
+    @State private var lastVolumeUpdateTime: Date = Date.distantPast
+    private let volumeUpdateThrottle: TimeInterval = 0.1
+    
+    var body: some View {
+        HStack(spacing: 4) {
+            Button(action: {
+                if musicManager.volumeControlSupported {
+                    withAnimation(.easeInOut(duration: 0.12)) {
+                        showVolumeSlider.toggle()
+                    }
+                }
+            }) {
+                Image(systemName: volumeIcon)
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(musicManager.volumeControlSupported ? .white : .gray)
+            }
+            .buttonStyle(PlainButtonStyle())
+            .disabled(!musicManager.volumeControlSupported)
+            .frame(width: 24)
+
+            if showVolumeSlider && musicManager.volumeControlSupported {
+                CustomSlider(
+                    value: $volumeSliderValue,
+                    range: 0.0...1.0,
+                    color: .white,
+                    dragging: $dragging,
+                    lastDragged: .constant(Date.distantPast),
+                    onValueChange: { newValue in
+                        MusicManager.shared.setVolume(to: newValue)
+                    },
+                    onDragChange: { newValue in
+                        let now = Date()
+                        if now.timeIntervalSince(lastVolumeUpdateTime) > volumeUpdateThrottle {
+                            MusicManager.shared.setVolume(to: newValue)
+                            lastVolumeUpdateTime = now
+                        }
+                    }
+                )
+                .frame(width: 48, height: 8)
+                .transition(.scale.combined(with: .opacity))
+            }
+        }
+        .clipped()
+        .onReceive(musicManager.$volume) { volume in
+            if !dragging {
+                volumeSliderValue = volume
+            }
+        }
+        .onReceive(musicManager.$volumeControlSupported) { supported in
+            if !supported {
+                withAnimation(.easeInOut(duration: 0.2)) {
+                    showVolumeSlider = false
+                }
+            }
+        }
+        .onChange(of: showVolumeSlider) { _, isShowing in
+            if isShowing {
+                // Sync volume from app when slider appears
+                Task {
+                    await MusicManager.shared.syncVolumeFromActiveApp()
+                }
+            }
+        }
+        .onDisappear {
+            // volumeUpdateTask?.cancel() // No longer needed
+        }
+    }
+    
+    
+    private var volumeIcon: String {
+        if !musicManager.volumeControlSupported {
+            return "speaker.slash"
+        } else if volumeSliderValue == 0 {
+            return "speaker.slash.fill"
+        } else if volumeSliderValue < 0.33 {
+            return "speaker.1.fill"
+        } else if volumeSliderValue < 0.66 {
+            return "speaker.2.fill"
+        } else {
+            return "speaker.3.fill"
+        }
+    }
+}
+
+// MARK: - Main View
+
+struct NotchHomeView: View {
+    @EnvironmentObject var vm: BoringViewModel
+    @ObservedObject var webcamManager = WebcamManager.shared
+    @ObservedObject var batteryModel = BatteryStatusViewModel.shared
+    @ObservedObject var coordinator = BoringViewCoordinator.shared
+    let albumArtNamespace: Namespace.ID
+
+    var body: some View {
+        Group {
+            if !coordinator.firstLaunch {
+                mainContent
+            }
+        }
+        // simplified: use a straightforward opacity transition
+        .transition(.opacity)
+    }
+
+    private var shouldShowCamera: Bool {
+        Defaults[.showMirror] && webcamManager.cameraAvailable && vm.isCameraExpanded
+    }
+
+    private var mainContent: some View {
+        HStack(alignment: .top, spacing: (shouldShowCamera && Defaults[.showCalendar]) ? 10 : 15) {
+            if Defaults[.showMusicPlayer] {
+                MusicPlayerView(albumArtNamespace: albumArtNamespace)
+            }
+
+            if Defaults[.showCalendar] {
+                CalendarView()
+                    .frame(width: shouldShowCamera ? 170 : 215)
+                    .onHover { isHovering in
+                        vm.isHoveringCalendar = isHovering
+                    }
+                    .environmentObject(vm)
+                    .transition(.opacity)
+            }
+
+            if shouldShowCamera {
+                CameraPreviewView(webcamManager: webcamManager)
+                    .scaledToFit()
+                    .opacity(vm.notchState == .closed ? 0 : 1)
+                    .blur(radius: vm.notchState == .closed ? 20 : 0)
+                    .animation(.interactiveSpring(response: 0.32, dampingFraction: 0.76, blendDuration: 0), value: shouldShowCamera)
+            }
+            
+            if Defaults[.showSystemControls] {
+                Spacer(minLength: 0)
+                SystemControlsView()
+                    .transition(.opacity)
+            }
+        }
+        .frame(maxWidth: .infinity)
+        .transition(.asymmetric(insertion: .opacity.combined(with: .move(edge: .top)), removal: .opacity))
+        .blur(radius: vm.notchState == .closed ? 30 : 0)
+    }
+}
+
+struct MusicSliderView: View {
+    @Binding var sliderValue: Double
+    @Binding var duration: Double
+    @Binding var lastDragged: Date
+    var color: NSColor
+    @Binding var dragging: Bool
+    let currentDate: Date
+    let timestampDate: Date
+    let elapsedTime: Double
+    let playbackRate: Double
+    let isPlaying: Bool
+    var onValueChange: (Double) -> Void
+
+
+    var body: some View {
+        VStack {
+            CustomSlider(
+                value: $sliderValue,
+                range: 0...duration,
+                color: Defaults[.sliderColor] == SliderColorEnum.albumArt
+                    ? Color(nsColor: color).ensureMinimumBrightness(factor: 0.8)
+                    : Defaults[.sliderColor] == SliderColorEnum.accent ? .effectiveAccent : .white,
+                dragging: $dragging,
+                lastDragged: $lastDragged,
+                onValueChange: onValueChange
+            )
+            .frame(height: 10, alignment: .center)
+
+            HStack {
+                Text(timeString(from: sliderValue))
+                Spacer()
+                Text(timeString(from: duration))
+            }
+            .fontWeight(.medium)
+            .foregroundColor(
+                Defaults[.playerColorTinting]
+                    ? Color(nsColor: color).ensureMinimumBrightness(factor: 0.6) : .gray
+            )
+            .font(.caption)
+        }
+        .onChange(of: currentDate) {
+           guard !dragging, timestampDate.timeIntervalSince(lastDragged) > -1 else { return }
+            sliderValue = MusicManager.shared.estimatedPlaybackPosition(at: currentDate)
+        }
+    }
+
+    func timeString(from seconds: Double) -> String {
+        let totalMinutes = Int(seconds) / 60
+        let remainingSeconds = Int(seconds) % 60
+        let hours = totalMinutes / 60
+        let minutes = totalMinutes % 60
+
+        if hours > 0 {
+            return String(format: "%d:%02d:%02d", hours, minutes, remainingSeconds)
+        } else {
+            return String(format: "%d:%02d", minutes, remainingSeconds)
+        }
+    }
+}
+
+struct CustomSlider: View {
+    @Binding var value: Double
+    var range: ClosedRange<Double>
+    var color: Color = .white
+    @Binding var dragging: Bool
+    @Binding var lastDragged: Date
+    var onValueChange: ((Double) -> Void)?
+    var onDragChange: ((Double) -> Void)?
+
+    var body: some View {
+        GeometryReader { geometry in
+            let width = geometry.size.width
+            let height = CGFloat(dragging ? 9 : 5)
+            let rangeSpan = range.upperBound - range.lowerBound
+
+            let progress = rangeSpan == .zero ? 0 : (value - range.lowerBound) / rangeSpan
+            let filledTrackWidth = min(max(progress, 0), 1) * width
+
+            ZStack(alignment: .leading) {
+                Rectangle()
+                    .fill(.gray.opacity(0.3))
+                    .frame(height: height)
+
+                Rectangle()
+                    .fill(color)
+                    .frame(width: filledTrackWidth, height: height)
+            }
+            .cornerRadius(height / 2)
+            .frame(height: 10)
+            .contentShape(Rectangle())
+            .gesture(
+                DragGesture(minimumDistance: 0)
+                    .onChanged { gesture in
+                        withAnimation {
+                            dragging = true
+                        }
+                        let newValue = range.lowerBound + Double(gesture.location.x / width) * rangeSpan
+                        value = min(max(newValue, range.lowerBound), range.upperBound)
+                        onDragChange?(value)
+                    }
+                    .onEnded { _ in
+                        onValueChange?(value)
+                        dragging = false
+                        lastDragged = Date()
+                    }
+            )
+            .animation(.spring(response: 0.35, dampingFraction: 0.7), value: dragging)
+        }
+    }
+}
+
+struct SystemControlsView: View {
+    @State private var showVolumeSlider: Bool = false
+    @State private var showBrightnessSlider: Bool = false
+    @State private var volumeSliderValue: Double = 0.5
+    @State private var brightnessSliderValue: Double = 0.5
+    @State private var volumeDragging: Bool = false
+    @State private var brightnessDragging: Bool = false
+    
+    var body: some View {
+        VStack(spacing: 12) {
+            volumeControl
+            brightnessControl
+            Spacer(minLength: 0)
+        }
+        .frame(minHeight: 120)
+        .padding(.top, 10)
+        .padding(.trailing, 10)
+        .task {
+            volumeSliderValue = Double(VolumeManager.shared.rawVolume)
+            brightnessSliderValue = Double(BrightnessManager.shared.rawBrightness)
+        }
+    }
+    
+    private var volumeControl: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.12)) {
+                        showVolumeSlider.toggle()
+                    }
+                }) {
+                    Image(systemName: volumeIcon)
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(.white)
+                        .frame(width: 32, height: 32)
+                        .background(
+                            Circle()
+                                .fill(Color.white.opacity(0.15))
+                        )
+                }
+                .buttonStyle(PlainButtonStyle())
+                
+                if showVolumeSlider {
+                    VStack(spacing: 4) {
+                        CustomSlider(
+                            value: $volumeSliderValue,
+                            range: 0.0...1.0,
+                            color: .white,
+                            dragging: $volumeDragging,
+                            lastDragged: .constant(Date.distantPast),
+                            onValueChange: { newValue in
+                                VolumeManager.shared.setAbsolute(Float(newValue))
+                            }
+                        )
+                        .frame(width: 120, height: 8)
+                        
+                        Text("\(Int(volumeSliderValue * 100))%")
+                            .font(.caption2)
+                            .foregroundColor(.gray)
+                    }
+                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                }
+            }
+        }
+    }
+    
+    private var brightnessControl: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Button(action: {
+                    withAnimation(.easeInOut(duration: 0.12)) {
+                        showBrightnessSlider.toggle()
+                    }
+                }) {
+                    Image(systemName: brightnessIcon)
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(.white)
+                        .frame(width: 32, height: 32)
+                        .background(
+                            Circle()
+                                .fill(Color.white.opacity(0.15))
+                        )
+                }
+                .buttonStyle(PlainButtonStyle())
+                
+                if showBrightnessSlider {
+                    VStack(spacing: 4) {
+                        CustomSlider(
+                            value: $brightnessSliderValue,
+                            range: 0.0...1.0,
+                            color: .white,
+                            dragging: $brightnessDragging,
+                            lastDragged: .constant(Date.distantPast),
+                            onValueChange: { newValue in
+                                BrightnessManager.shared.setAbsolute(value: Float(newValue))
+                            }
+                        )
+                        .frame(width: 120, height: 8)
+                        
+                        Text("\(Int(brightnessSliderValue * 100))%")
+                            .font(.caption2)
+                            .foregroundColor(.gray)
+                    }
+                    .transition(.opacity.combined(with: .scale(scale: 0.8)))
+                }
+            }
+        }
+    }
+    
+    private var volumeIcon: String {
+        let volume = VolumeManager.shared.rawVolume
+        if VolumeManager.shared.isMuted || volume == 0 {
+            return "speaker.slash.fill"
+        } else if volume < 0.3 {
+            return "speaker.wave.1.fill"
+        } else if volume < 0.7 {
+            return "speaker.wave.2.fill"
+        } else {
+            return "speaker.wave.3.fill"
+        }
+    }
+    
+    private var brightnessIcon: String {
+        let brightness = BrightnessManager.shared.rawBrightness
+        if brightness < 0.3 {
+            return "sun.min.fill"
+        } else if brightness < 0.7 {
+            return "sun.max.fill"
+        } else {
+            return "sun.max.fill"
+        }
+    }
+}
+
+struct PanelTextField: NSViewRepresentable {
+    @Binding var text: String
+    var placeholder: String
+    var onCommit: (() -> Void)?
+    
+    func makeNSView(context: Context) -> NSTextField {
+        let textField = NSTextField()
+        textField.placeholderString = placeholder
+        textField.stringValue = text
+        textField.delegate = context.coordinator
+        textField.isBordered = false
+        textField.drawsBackground = false
+        textField.focusRingType = .none
+        textField.font = NSFont.systemFont(ofSize: 13)
+        textField.textColor = NSColor.white
+        textField.backgroundColor = .clear
+        textField.cell?.wraps = true
+        textField.cell?.isScrollable = true
+        textField.lineBreakMode = .byWordWrapping
+        textField.maximumNumberOfLines = 0
+        textField.alignment = .left
+        textField.usesSingleLineMode = false
+        
+        if let cell = textField.cell as? NSTextFieldCell {
+            cell.placeholderAttributedString = NSAttributedString(
+                string: placeholder,
+                attributes: [
+                    .foregroundColor: NSColor.gray,
+                    .font: NSFont.systemFont(ofSize: 13)
+                ]
+            )
+        }
+        
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.2) {
+            NSApp.activate(ignoringOtherApps: true)
+            if let window = textField.window {
+                window.makeKeyAndOrderFront(nil)
+                window.makeFirstResponder(textField)
+            }
+        }
+        return textField
+    }
+    
+    func updateNSView(_ nsView: NSTextField, context: Context) {
+        if nsView.stringValue != text {
+            nsView.stringValue = text
+        }
+    }
+    
+    func makeCoordinator() -> Coordinator {
+        Coordinator(self)
+    }
+    
+    class Coordinator: NSObject, NSTextFieldDelegate {
+        var parent: PanelTextField
+        
+        init(_ parent: PanelTextField) {
+            self.parent = parent
+        }
+        
+        func controlTextDidChange(_ obj: Notification) {
+            guard let textField = obj.object as? NSTextField else { return }
+            parent.text = textField.stringValue
+        }
+        
+        func control(_ control: NSControl, textShouldEndEditing fieldEditor: NSText) -> Bool {
+            parent.text = fieldEditor.string
+            parent.onCommit?()
+            return true
+        }
+    }
+}
+
+struct TranslatorView: View {
+    @State private var inputText: String = ""
+    @State private var translatedText: String = ""
+    @State private var isTranslating: Bool = false
+    @State private var sourceLanguage: String = "zh"
+    @State private var targetLanguage: String = "en"
+    @State private var translateTask: Task<Void, Never>?
+    
+    var body: some View {
+        HStack(spacing: 15) {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack {
+                    Text(sourceLanguage == "zh" ? "中文" : "English")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                    Spacer()
+                    Button(action: swapLanguages) {
+                        Image(systemName: "arrow.left.arrow.right")
+                            .font(.system(size: 12))
+                            .foregroundColor(.white.opacity(0.7))
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    Text(targetLanguage == "en" ? "English" : "中文")
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                }
+                
+                HStack(spacing: 10) {
+                    VStack {
+                        PanelTextField(text: $inputText, placeholder: sourceLanguage == "zh" ? "输入中文..." : "Enter English...") {
+                            scheduleTranslate()
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .frame(height: 80)
+                    .padding(8)
+                    .background(Color.white.opacity(0.1))
+                    .cornerRadius(8)
+                    .onChange(of: inputText) { _, newValue in
+                        if !newValue.isEmpty {
+                            scheduleTranslate()
+                        } else {
+                            translatedText = ""
+                            translateTask?.cancel()
+                        }
+                    }
+                    
+                    VStack {
+                        if isTranslating {
+                            ProgressView()
+                                .scaleEffect(0.7)
+                                .frame(width: 20, height: 20)
+                        } else {
+                            Image(systemName: "arrow.right")
+                                .foregroundColor(.gray)
+                        }
+                    }
+                    .frame(width: 20)
+                    
+                    ZStack(alignment: .topLeading) {
+                        if translatedText.isEmpty && !isTranslating {
+                            Text(targetLanguage == "en" ? "Translation..." : "翻译结果...")
+                                .foregroundColor(.gray.opacity(0.5))
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                        }
+                        ScrollView {
+                            Text(translatedText)
+                                .font(.system(size: 13))
+                                .foregroundColor(.white)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 6)
+                                .textSelection(.enabled)
+                        }
+                    }
+                    .frame(height: 80)
+                    .background(Color.white.opacity(0.05))
+                    .cornerRadius(8)
+                }
+                
+                HStack {
+                    Button(action: clearAll) {
+                        HStack(spacing: 4) {
+                            Image(systemName: "xmark.circle.fill")
+                            Text("Clear")
+                        }
+                        .font(.caption)
+                        .foregroundColor(.gray)
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    
+                    Spacer()
+                    
+                    if isTranslating {
+                        Text("Translating...")
+                            .font(.caption2)
+                            .foregroundColor(.gray)
+                    }
+                    
+                    if !translatedText.isEmpty {
+                        Button(action: copyTranslation) {
+                            HStack(spacing: 4) {
+                                Image(systemName: "doc.on.doc")
+                                Text("Copy")
+                            }
+                            .font(.caption)
+                            .foregroundColor(.white.opacity(0.7))
+                        }
+                        .buttonStyle(PlainButtonStyle())
+                    }
+                }
+            }
+            .padding(.horizontal, 15)
+            .padding(.vertical, 10)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .onAppear {
+            enableKeyboardInput()
+        }
+        .onDisappear {
+            disableKeyboardInput()
+        }
+    }
+    
+    private func enableKeyboardInput() {
+        if let window = NSApp.windows.first(where: { $0 is BoringNotchSkyLightWindow }) as? BoringNotchSkyLightWindow {
+            window.enableKeyboardInput()
+        }
+    }
+    
+    private func disableKeyboardInput() {
+        if let window = NSApp.windows.first(where: { $0 is BoringNotchSkyLightWindow }) as? BoringNotchSkyLightWindow {
+            window.disableKeyboardInput()
+        }
+    }
+    
+    private func swapLanguages() {
+        translateTask?.cancel()
+        let temp = sourceLanguage
+        sourceLanguage = targetLanguage
+        targetLanguage = temp
+        
+        let tempText = inputText
+        inputText = translatedText
+        translatedText = tempText
+    }
+    
+    private func clearAll() {
+        translateTask?.cancel()
+        inputText = ""
+        translatedText = ""
+        isTranslating = false
+    }
+    
+    private func copyTranslation() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(translatedText, forType: .string)
+    }
+    
+    private func scheduleTranslate() {
+        let text = inputText.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !text.isEmpty else {
+            translatedText = ""
+            isTranslating = false
+            translateTask?.cancel()
+            return
+        }
+
+        translateTask?.cancel()
+        isTranslating = true
+        let currentInput = inputText
+        let currentSource = sourceLanguage
+        let currentTarget = targetLanguage
+
+        translateTask = Task {
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            guard !Task.isCancelled else { return }
+            do {
+                let result = try await VolcengineTranslationService.shared.translate(
+                    text: currentInput,
+                    sourceLanguage: currentSource,
+                    targetLanguage: currentTarget
+                )
+                await MainActor.run {
+                    if self.inputText == currentInput && self.sourceLanguage == currentSource && self.targetLanguage == currentTarget {
+                        self.translatedText = result
+                        self.isTranslating = false
+                    }
+                }
+            } catch {
+                await MainActor.run {
+                    if self.inputText == currentInput && self.sourceLanguage == currentSource && self.targetLanguage == currentTarget {
+                        self.translatedText = (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+                        self.isTranslating = false
+                    }
+                }
+            }
+        }
+    }
+}
