@@ -24,6 +24,16 @@
 	<array>
 		<string>com.spotify.client</string>
 		<string>com.apple.Music</string>
+		<string>com.apple.systemevents</string>
+	</array>
+	<key>com.apple.security.temporary-exception.files.home-relative-path.read-only</key>
+	<array>
+		<string>/Library/Application Support/Trae CN/</string>
+		<string>/.claude/</string>
+		<string>/.codex/</string>
+		<string>/Desktop/</string>
+		<string>/Documents/</string>
+		<string>/Downloads/</string>
 	</array>
 	<key>com.apple.security.temporary-exception.mach-lookup.global-name</key>
 	<array>

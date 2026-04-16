@@ -23,6 +23,7 @@ struct ContentView: View {
     @ObservedObject var batteryModel = BatteryStatusViewModel.shared
     @ObservedObject var brightnessManager = BrightnessManager.shared
     @ObservedObject var volumeManager = VolumeManager.shared
+    @StateObject private var aiState = AIActiveState()
     @State private var hoverTask: Task<Void, Never>?
     @State private var isHovering: Bool = false
     @State private var anyDropDebounceTask: Task<Void, Never>?
@@ -43,6 +44,7 @@ struct ContentView: View {
     private let animationSpring = Animation.interactiveSpring(response: 0.38, dampingFraction: 0.8, blendDuration: 0)
 
     private let extendedHoverPadding: CGFloat = 30
+
     private let zeroHeightHoverPadding: CGFloat = 10
 
     private var topCornerRadius: CGFloat {
@@ -70,6 +72,10 @@ struct ContentView: View {
         } else if (!coordinator.expandingView.show || coordinator.expandingView.type == .music)
             && vm.notchState == .closed && (musicManager.isPlaying || !musicManager.isPlayerIdle)
             && coordinator.musicLiveActivityEnabled && !vm.hideOnClosed
+        {
+            chinWidth += (2 * max(0, vm.effectiveClosedNotchHeight - 12) + 20)
+        } else if !coordinator.expandingView.show && vm.notchState == .closed
+            && aiState.hasActiveTools && !vm.hideOnClosed
         {
             chinWidth += (2 * max(0, vm.effectiveClosedNotchHeight - 12) + 20)
         } else if !coordinator.expandingView.show && vm.notchState == .closed
@@ -290,6 +296,8 @@ struct ContentView: View {
                       } else if (!coordinator.expandingView.show || coordinator.expandingView.type == .music) && vm.notchState == .closed && (musicManager.isPlaying || !musicManager.isPlayerIdle) && coordinator.musicLiveActivityEnabled && !vm.hideOnClosed {
                           MusicLiveActivity()
                               .frame(alignment: .center)
+                      } else if !coordinator.expandingView.show && vm.notchState == .closed && aiState.hasActiveTools && !vm.hideOnClosed {
+                          AIClosedIndicator()
                       } else if !coordinator.expandingView.show && vm.notchState == .closed && (!musicManager.isPlaying && musicManager.isPlayerIdle) && Defaults[.showNotHumanFace] && !vm.hideOnClosed  {
                           BoringFaceAnimation()
                        } else if vm.notchState == .open {
@@ -345,6 +353,8 @@ struct ContentView: View {
             if vm.notchState == .open {
                 VStack {
                     switch coordinator.currentView {
+                    case .ai:
+                        AIStatusView()
                     case .home:
                         NotchHomeView(albumArtNamespace: albumArtNamespace)
                     case .shelf:
@@ -385,6 +395,11 @@ struct ContentView: View {
             height: vm.effectiveClosedNotchHeight,
             alignment: .center
         )
+    }
+    
+    @ViewBuilder
+    func AIClosedIndicator() -> some View {
+        AIClosedIndicatorView()
     }
 
     @ViewBuilder
@@ -665,6 +680,90 @@ struct GeneralDropTargetDelegate: DropDelegate {
 
     func performDrop(info: DropInfo) -> Bool {
         return false
+    }
+}
+
+@MainActor
+final class AIActiveState: ObservableObject {
+    @Published var hasActiveTools: Bool = false
+    private var cancellable: AnyCancellable?
+
+    init() {
+        let mgr = AIActivityManager.shared
+        hasActiveTools = mgr.hasActiveTools
+        cancellable = mgr.objectWillChange
+            .receive(on: RunLoop.main)
+            .sink { [weak self, weak mgr] _ in
+                guard let self, let mgr else { return }
+                DispatchQueue.main.async {
+                    let newValue = mgr.hasActiveTools
+                    if self.hasActiveTools != newValue {
+                        self.hasActiveTools = newValue
+                    }
+                }
+            }
+    }
+}
+
+struct AIClosedIndicatorView: View {
+    @EnvironmentObject var vm: BoringViewModel
+    @ObservedObject var aiManager = AIActivityManager.shared
+
+    var body: some View {
+        let activeTools = Array(Set(aiManager.projects.flatMap { $0.tools }))
+            .sorted { $0.rawValue < $1.rawValue }
+        HStack {
+            HStack(spacing: 4) {
+                ForEach(activeTools, id: \.self) { tool in
+                    if let appIcon = tool.appIcon {
+                        Image(nsImage: appIcon)
+                            .resizable()
+                            .frame(width: max(0, vm.effectiveClosedNotchHeight - 14), height: max(0, vm.effectiveClosedNotchHeight - 14))
+                            .clipShape(Circle())
+                    } else {
+                        Circle()
+                            .fill(tool.brandColor)
+                            .frame(width: max(0, vm.effectiveClosedNotchHeight - 16), height: max(0, vm.effectiveClosedNotchHeight - 16))
+                            .overlay {
+                                Image(systemName: tool.icon)
+                                    .font(.system(size: 8))
+                                    .foregroundColor(.white)
+                            }
+                    }
+                }
+            }
+
+            Rectangle()
+                .fill(.black)
+                .frame(width: vm.closedNotchSize.width - 20)
+
+            HStack(spacing: 4) {
+                if aiManager.totalPendingApprovals > 0 {
+                    Text("\(aiManager.totalPendingApprovals)")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(.orange))
+                } else if aiManager.activeProjectCount > 0 {
+                    Text("\(aiManager.activeProjectCount)")
+                        .font(.system(size: 9, weight: .bold))
+                        .foregroundColor(.white)
+                        .padding(.horizontal, 4)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(.green.opacity(0.7)))
+                } else {
+                    Image(systemName: "cpu")
+                        .font(.system(size: 10))
+                        .foregroundColor(.green)
+                }
+            }
+            .frame(width: max(0, vm.effectiveClosedNotchHeight - 12), alignment: .center)
+        }
+        .frame(
+            height: vm.effectiveClosedNotchHeight,
+            alignment: .center
+        )
     }
 }
 
