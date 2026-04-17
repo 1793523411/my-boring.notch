@@ -7,6 +7,9 @@
 	objects = {
 
 /* Begin PBXBuildFile section */
+		AA10000A2F0E800000AAAAAA /* AIActivityModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10000B2F0E800000AAAAAA /* AIActivityModel.swift */; };
+		AA10000C2F0E800000AAAAAB /* AIActivityManager.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10000D2F0E800000AAAAAB /* AIActivityManager.swift */; };
+		AA10000E2F0E800000AAAAAC /* AIStatusView.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA10000F2F0E800000AAAAAC /* AIStatusView.swift */; };
 		1100290C2E847E2800035A57 /* NSItemProvider+LoadHelpers.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1100290B2E847E2800035A57 /* NSItemProvider+LoadHelpers.swift */; };
 		110029272E84FD4C00035A57 /* TemporaryFileStorageService.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110029262E84FD4C00035A57 /* TemporaryFileStorageService.swift */; };
 		1100292A2E8691B400035A57 /* FileShareView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 110029292E8691B400035A57 /* FileShareView.swift */; };
@@ -181,6 +184,9 @@
 /* End PBXCopyFilesBuildPhase section */
 
 /* Begin PBXFileReference section */
+		AA10000B2F0E800000AAAAAA /* AIActivityModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIActivityModel.swift; sourceTree = "<group>"; };
+		AA10000D2F0E800000AAAAAB /* AIActivityManager.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIActivityManager.swift; sourceTree = "<group>"; };
+		AA10000F2F0E800000AAAAAC /* AIStatusView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AIStatusView.swift; sourceTree = "<group>"; };
 		1100290B2E847E2800035A57 /* NSItemProvider+LoadHelpers.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = "NSItemProvider+LoadHelpers.swift"; sourceTree = "<group>"; };
 		110029262E84FD4C00035A57 /* TemporaryFileStorageService.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TemporaryFileStorageService.swift; sourceTree = "<group>"; };
 		110029292E8691B400035A57 /* FileShareView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FileShareView.swift; sourceTree = "<group>"; };
@@ -486,6 +492,7 @@
 		1471639B2C5D362F0068B555 /* components */ = {
 			isa = PBXGroup;
 			children = (
+				AA100011F2F0E80000AAAAAE /* AI */,
 				B141C23B2CA5F50900AC8CC8 /* Onboarding */,
 				B1C448992C97375A001F0858 /* Tips */,
 				14C08BB72C8DE49E000F8AA0 /* Calendar */,
@@ -510,6 +517,7 @@
 		147163B52C5D804B0068B555 /* managers */ = {
 			isa = PBXGroup;
 			children = (
+				AA10000D2F0E800000AAAAAB /* AIActivityManager.swift */,
 				11D58EA12E760AE100FA8377 /* ImageService.swift */,
 				F38DE6472D8243E2008B5C6D /* BatteryActivityManager.swift */,
 				112FB7342CCF16F70015238C /* NotchSpaceManager.swift */,
@@ -528,6 +536,14 @@
 				149E0B992C737D40006418B1 /* WebcamView.swift */,
 			);
 			path = Webcam;
+			sourceTree = "<group>";
+		};
+		AA100011F2F0E80000AAAAAE /* AI */ = {
+			isa = PBXGroup;
+			children = (
+				AA10000F2F0E800000AAAAAC /* AIStatusView.swift */,
+			);
+			path = AI;
 			sourceTree = "<group>";
 		};
 		14C08BB72C8DE49E000F8AA0 /* Calendar */ = {
@@ -626,6 +642,7 @@
 		14D570C72C5F38760011E668 /* models */ = {
 			isa = PBXGroup;
 			children = (
+				AA10000B2F0E800000AAAAAA /* AIActivityModel.swift */,
 				11F748812ECB07A400F841DB /* MusicControlButton.swift */,
 				118D1FD02E98FF5F00A2FF63 /* SharingStateManager.swift */,
 				1163988E2DF5CC870052E6AF /* CalendarModel.swift */,
@@ -1020,6 +1037,9 @@
 				1100290C2E847E2800035A57 /* NSItemProvider+LoadHelpers.swift in Sources */,
 				11CFC6632E09918400748C80 /* MusicControllerSelectionView.swift in Sources */,
 				B1F0A0022E60000100000001 /* BrightnessManager.swift in Sources */,
+				AA10000A2F0E800000AAAAAA /* AIActivityModel.swift in Sources */,
+				AA10000C2F0E800000AAAAAB /* AIActivityManager.swift in Sources */,
+				AA10000E2F0E800000AAAAAC /* AIStatusView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
